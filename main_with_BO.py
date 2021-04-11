@@ -13,7 +13,6 @@ import time
 
 ############################################################################################################################
 
-import BayOpt_modified
 from kalman_filter import Kalman_filter
 
 ############################################################################################################################
@@ -37,48 +36,23 @@ def car_speed(traffic_density_loc):
     v_max = 90 # [km/h]
     return v_max*np.exp(-traffic_density_loc)
 
-# compute expected time of arrival, given the actual car position, the traffic density 
-# and the parking probability estimate
-# def E_TOA(pos, s, traffic_density, pred):
-#     E_TOA = 0
-#     idx = np.searchsorted(x,s) 
-#     while x[idx] < pos:
-#         E_TOA += (segments[np.searchsorted(segments,x[idx])]-segments[np.searchsorted(segments,x[idx])-1]) \
-#                 /car_speed(mu[np.searchsorted(segments,x[idx])-1])
-#         idx +=1 
-#     E_wait = 0
-#     for k in range(idx,len(x)):
-#         E_wait += (k+1)*pred[k]*np.prod(1-pred[:k])
-#     print(E_wait)
-#     E_TOA += (x[idx+int(E_wait)]-x[idx])/v_parking
-#     idx = np.searchsorted(x,x[idx+int(E_wait)]) 
-#     while x[idx] < x[-1]:
-#         E_TOA += (segments[np.searchsorted(segments,x[idx])]-segments[np.searchsorted(segments,x[idx])-1]) \
-#                 /v_walk
-#         idx +=1 
-#     return E_TOA
-
 ############################################################################################################################
 
 # road length 
 L = 100 # [km]
 
 # traffic density as piecewise constant function
-nb_segments = 50
-x = np.linspace(0, L, nb_segments) # domain
-segments = np.array([0])
-segments = np.hstack((segments,np.sort(np.random.uniform(0.1,L,size=nb_segments-1))))
-segments = np.hstack((segments,L) ) # array defining the spatial segments with constant density
-bolleans_segments = list()
+nb_segments = 50 # number of segments where the density is constant
+x = np.linspace(0, L, nb_segments) # space domain
 mu = np.empty(nb_segments) # density values per each segment
-for i in range(1,len(segments)):
-    if i==len(segments):
-        mu[i-1] = np.random.uniform()
-        bolleans_segments.append( (x <= segments[i])*(x >= segments[i-1]) )
+boolean_segments = []
+for i in range(1,len(x)):
+    mu[i-1] = np.random.uniform()
+    if i==len(x):
+        boolean_segments.append( (x <= x[i])*(x >= x[i-1]) )
     else: 
-        mu[i-1] = np.random.uniform()
-        bolleans_segments.append( (x < segments[i])*(x >= segments[i-1]) )
-traffic_density = np.piecewise(x, bolleans_segments, mu) # traffic density over x
+        boolean_segments.append( (x < x[i])*(x >= x[i-1]) )
+traffic_density = np.piecewise(x, boolean_segments, mu) # traffic density over x
 
 # prior parking prob (given by roads characteristics and presence of parking slots)
 prior = [0.5]
@@ -102,7 +76,7 @@ v_walk = 3 # [km/h]
 # parking speed 
 v_parking = 10 # [km/h]
 # car speed
-v = car_speed(mu[np.searchsorted(segments,s)-1]) # [km/h]
+v = car_speed(mu[np.searchsorted(x,s)-1]) # [km/h]
 
 fig = plt.figure(figsize=(9,6))
 plt.ion()
@@ -126,18 +100,18 @@ while s < L:
         idx = np.random.randint(0,len(mu))
         mu[idx] = np.random.uniform()
         # update traffic density over x
-        traffic_density = np.piecewise(x, bolleans_segments, mu)
+        traffic_density = np.piecewise(x, boolean_segments, mu)
         # update underlying parking probability
         pP_true = prior* lambda_true(traffic_density)
         delete_idx = []
         for i in range(np.shape(X)[0]):
-            if X[i] <= segments[idx+1] and X[i] >= segments[idx]:
+            if X[i] <= x[idx+1] and X[i] >= x[idx]:
                 delete_idx.append(i)
         X = np.delete(X,delete_idx).reshape(-1,1)
         y = np.delete(y,delete_idx).reshape(-1,1)
         delete_idx = []
         for i in range(np.shape(X_extensive)[0]):
-            if X_extensive[i] <= segments[idx+1] and X_extensive[i] >= segments[idx]:
+            if X_extensive[i] <= x[idx+1] and X_extensive[i] >= x[idx]:
                 delete_idx.append(i)
         X_extensive = np.delete(X_extensive,delete_idx).reshape(-1,1)
         y_extensive = np.delete(y_extensive,delete_idx).reshape(-1,1)
@@ -156,13 +130,13 @@ while s < L:
     # measurement
     actual = np.asscalar( 
             prior[np.searchsorted(x,sample_pos)-1]* \
-            np.clip(lambda_true(mu[np.searchsorted(segments,sample_pos)-1]) +np.random.uniform(-0.1,0.1),0,1 )
+            np.clip(lambda_true(mu[np.searchsorted(x,sample_pos)-1]) +np.random.uniform(-0.1,0.1),0,1 )
         )
     # actual = actual/prior[np.searchsorted(x,sample_pos)-1]
 
     actual_extensive = np.asscalar( 
         prior[np.searchsorted(x,s)-1]* \
-        np.clip(lambda_true(mu[np.searchsorted(segments,s)-1]) +np.random.uniform(-0.1,0.1),0,1 )
+        np.clip(lambda_true(mu[np.searchsorted(x,s)-1]) +np.random.uniform(-0.1,0.1),0,1 )
         )
     # actual_extensive = actual_extensive/prior[np.searchsorted(x,s)-1]
 
@@ -240,7 +214,7 @@ while s < L:
     # rmse_IH.append( np.sqrt(np.mean((pred_IH-pP_true)**2)))
     
     # update car position
-    v = car_speed(mu[np.searchsorted(segments,s)-1])
+    v = car_speed(mu[np.searchsorted(x,s)-1])
     s += v*DeltaT
 
     # choose next best point where to sample
@@ -261,8 +235,8 @@ while s < L:
 
     # visualization
     sub1=plt.subplot(3,1,1)
-    plt.scatter(s,mu[min(np.searchsorted(segments,s)-1,len(mu)-1)])
-    plt.scatter(next_sample,mu[min(np.searchsorted(segments,next_sample)-1,len(mu)-1)])
+    plt.scatter(s,mu[min(np.searchsorted(x,s)-1,len(mu)-1)])
+    plt.scatter(next_sample,mu[min(np.searchsorted(x,next_sample)-1,len(mu)-1)])
     plt.plot(x,traffic_density)
     plt.xlabel(r'$x$')
     plt.ylabel(r'$\mu(x,t)$')
